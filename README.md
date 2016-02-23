@@ -21,6 +21,20 @@ This library has below advantages than it:
 - Following original code's structure where possible.
 - Paying attention to performance; using `FileChannel#transferTo` and not using String comparison.
 
+## Installation
+
+Available from [JCenter](https://bintray.com/bintray/jcenter).
+
+```
+repositories {
+   jcenter()
+}
+```
+
+```
+compile 'net.ypresto.qtfaststartjava:qtfaststart:0.1.0'
+```
+
 ## License
 
 MIT license.
