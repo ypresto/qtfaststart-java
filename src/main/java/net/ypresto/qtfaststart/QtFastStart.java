@@ -146,6 +146,7 @@ public class QtFastStart {
     private static final int ATOM_PREAMBLE_SIZE = 8;
 
     /**
+     * Attempts to enable fast start by moving the MOOV atom to the front of the file.
      * @param in  Input file.
      * @param out Output file.
      * @return false if input file is already fast start.
@@ -168,6 +169,108 @@ public class QtFastStart {
                 out.delete();
             }
         }
+    }
+
+    /**
+     * Checks to see if the supplied file is a qt-faststart enabled movie.
+     * @param in the file to check
+     * @return true if the video is a quicktime format movie with fast start enabled (moov atom isn't last).
+     * @throws IOException
+     * @throws MalformedFileException
+     * @throws UnsupportedFileException
+     */
+    public static boolean isFastStartEnabled(File in) throws IOException, MalformedFileException, UnsupportedFileException {
+        FileInputStream inStream = null;
+        try {
+            inStream = new FileInputStream(in);
+            FileChannel infile = inStream.getChannel();
+
+            return isFastStartEnabledImpl(infile);
+        }
+        finally {
+            safeClose(inStream);
+        }
+    }
+
+    private static boolean isFastStartEnabledImpl(FileChannel infile) throws IOException, MalformedFileException, UnsupportedFileException {
+        ByteBuffer atomBytes = ByteBuffer.allocate(ATOM_PREAMBLE_SIZE).order(ByteOrder.BIG_ENDIAN);
+        boolean moovAtomEncountered = false;
+        int atomType = 0;
+        long atomSize = 0; // uint64_t
+        ByteBuffer ftypAtom = null;
+
+        // traverse through the atoms in the file to make sure that 'moov' is at the end
+        while (readAndFill(infile, atomBytes)) {
+            atomSize = uint32ToLong(atomBytes.getInt()); // uint32
+            atomType = atomBytes.getInt(); // representing uint32_t in signed int
+
+            // keep ftyp atom
+            if (atomType == FTYP_ATOM) {
+                int ftypAtomSize = uint32ToInt(atomSize); // XXX: assume in range of int32_t
+                ftypAtom = ByteBuffer.allocate(ftypAtomSize).order(ByteOrder.BIG_ENDIAN);
+                atomBytes.rewind();
+                ftypAtom.put(atomBytes);
+                if (infile.read(ftypAtom) < ftypAtomSize - ATOM_PREAMBLE_SIZE) break;
+                ftypAtom.flip();
+            }
+            else {
+                if (atomSize == 1) {
+                    /* 64-bit special case */
+                    atomBytes.clear();
+                    if (!readAndFill(infile, atomBytes)) break;
+                    atomSize = uint64ToLong(atomBytes.getLong()); // XXX: assume in range of int64_t
+                    infile.position(infile.position() + atomSize - ATOM_PREAMBLE_SIZE * 2); // seek
+                } else {
+                    infile.position(infile.position() + atomSize - ATOM_PREAMBLE_SIZE); // seek
+                }
+            }
+            if (sDEBUG) printf("%c%c%c%c %10d %d",
+                    (atomType >> 24) & 255,
+                    (atomType >> 16) & 255,
+                    (atomType >> 8) & 255,
+                    (atomType >> 0) & 255,
+                    infile.position() - atomSize,
+                    atomSize);
+            if ((atomType != FREE_ATOM)
+                    && (atomType != JUNK_ATOM)
+                    && (atomType != MDAT_ATOM)
+                    && (atomType != MOOV_ATOM)
+                    && (atomType != PNOT_ATOM)
+                    && (atomType != SKIP_ATOM)
+                    && (atomType != WIDE_ATOM)
+                    && (atomType != PICT_ATOM)
+                    && (atomType != UUID_ATOM)
+                    && (atomType != FTYP_ATOM)) {
+                printf("encountered non-QT top-level atom (is this a QuickTime file?)");
+                break;
+            }
+
+            if (atomType == MOOV_ATOM) {
+                moovAtomEncountered = true;
+
+                if (sDEBUG) {
+                    printf("MOOV atom encountered at %10d %d", infile.position() - atomSize, atomSize);
+                }
+            }
+
+
+        /* The atom header is 8 (or 16 bytes), if the atom size (which
+         * includes these 8 or 16 bytes) is less than that, we won't be
+         * able to continue scanning sensibly after this atom, so break. */
+            if (atomSize < 8)
+                break;
+        }
+
+        if (atomType != MOOV_ATOM && moovAtomEncountered) {
+            printf("A moov atom was encountered and it wasn't the last atom in file");
+            return true;
+        }
+
+        if (atomType != MOOV_ATOM && !moovAtomEncountered) {
+            printf("last atom in file was not a moov atom but no moov atom was encountered.");
+        }
+
+        return false;
     }
 
     private static boolean fastStartImpl(FileChannel infile, FileChannel outfile) throws IOException, MalformedFileException, UnsupportedFileException {
