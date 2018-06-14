@@ -7,11 +7,16 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import static org.junit.Assert.*;
 
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
 
 public class QtFastStartFunctionalTest {
+
+    static final String FAST_START_ENABLED_FILE_HASH = "b6ead8494587b9c0cb44f0e96ff853cc";
 
     static Path testFilePath;
 
@@ -55,6 +60,7 @@ public class QtFastStartFunctionalTest {
 
         assertTrue(success);
         assertTrue(Files.exists(fastStartOutPath));
+        assertEquals(FAST_START_ENABLED_FILE_HASH, getMD5Checksum(fastStartOutPath));
     }
 
     @Test
@@ -96,5 +102,59 @@ public class QtFastStartFunctionalTest {
         boolean afterEnableCheck = QtFastStart.isFastStartEnabled(fastStartOutPath.toFile());
 
         assertTrue(afterEnableCheck);
+        assertEquals(FAST_START_ENABLED_FILE_HASH, getMD5Checksum(fastStartOutPath));
+    }
+
+    @Test
+    public void checkForFastStartEnabledOnNonMovieDoesntThrowException() throws Exception {
+        Path nonMoviePath = testFolder.getRoot().toPath().resolve("test-file.txt");
+        Files.write(nonMoviePath, "Here is some text".getBytes(), StandardOpenOption.CREATE_NEW);
+
+        assertTrue(Files.exists(nonMoviePath));
+
+        boolean fastStartEnabled = QtFastStart.isFastStartEnabled(nonMoviePath.toFile());
+
+        assertFalse(fastStartEnabled);
+    }
+
+    @Test
+    public void attemptToFastStartOnNonMovieDoesntThrowException() throws Exception {
+        Path nonMoviePath = testFolder.getRoot().toPath().resolve("test-file.txt");
+        Path outPath = testFolder.getRoot().toPath().resolve("out.mov");
+        Files.write(nonMoviePath, "Here is some text".getBytes(), StandardOpenOption.CREATE_NEW);
+
+        assertTrue(Files.exists(nonMoviePath));
+
+        boolean fastStartEnabled = QtFastStart.fastStart(nonMoviePath.toFile(), outPath.toFile());
+
+        assertFalse(fastStartEnabled);
+    }
+
+    private static byte[] createChecksum(Path filePath) throws Exception {
+        InputStream fis =  new FileInputStream(filePath.toFile());
+
+        byte[] buffer = new byte[1024];
+        MessageDigest complete = MessageDigest.getInstance("MD5");
+        int numRead;
+
+        do {
+            numRead = fis.read(buffer);
+            if (numRead > 0) {
+                complete.update(buffer, 0, numRead);
+            }
+        } while (numRead != -1);
+
+        fis.close();
+        return complete.digest();
+    }
+
+    private static String getMD5Checksum(Path filePath) throws Exception {
+        byte[] b = createChecksum(filePath);
+        StringBuilder buffer = new StringBuilder();
+
+        for (int i=0; i < b.length; i++) {
+            buffer.append(Integer.toString( ( b[i] & 0xff ) + 0x100, 16).substring( 1 ));
+        }
+        return buffer.toString();
     }
 }
